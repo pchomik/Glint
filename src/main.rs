@@ -1,10 +1,10 @@
 #![windows_subsystem = "windows"]
 
 use regex::Regex;
-use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use toml::Value;
 use windows::core::w;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Direct2D::Common::*;
@@ -28,14 +28,6 @@ static mut CORNER_RADIUS_PX: i32 = 0;
 static mut IGNORED_REGEXES: Vec<Regex> = Vec::new();
 static mut D2D_FACTORY: Option<ID2D1Factory> = None;
 
-// JSON Configuration Structure
-#[derive(Deserialize)]
-struct Config {
-    window_border_radius: Option<i32>,
-    window_border_width: Option<i32>,
-    ignored_windows: Option<Vec<String>>,
-}
-
 // Hardcoded list of window classes to ALWAYS skip (System UI)
 const SYSTEM_IGNORE_CLASSES: &[&str] = &[
     "Windows.UI.Core.CoreWindow", // Start Menu, Search, Action Center
@@ -52,24 +44,26 @@ fn load_config() {
 
     if let Ok(user_profile) = env::var("USERPROFILE") {
         let path = PathBuf::from(user_profile)
-            .join(".window_border")
-            .join("config.json");
+            .join(".config")
+            .join("window_border.toml");
 
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(config) = serde_json::from_str::<Config>(&content) {
-                    if let Some(w) = config.window_border_width {
-                        width = w;
+                if let Ok(value) = content.parse::<Value>() {
+                    if let Some(w) = value.get("window_border_width").and_then(|v| v.as_integer()) {
+                        width = w as i32;
                     }
-                    if let Some(r) = config.window_border_radius {
-                        radius = r;
+                    if let Some(r) = value.get("window_border_radius").and_then(|v| v.as_integer()) {
+                        radius = r as i32;
                     }
                     // Compile regex patterns
-                    if let Some(patterns) = config.ignored_windows {
+                    if let Some(patterns) = value.get("ignored_windows").and_then(|v| v.as_array()) {
                         for pattern in patterns {
-                            // Attempt to compile regex, ignore invalid ones
-                            if let Ok(re) = Regex::new(&pattern) {
-                                regexes.push(re);
+                            if let Some(pattern_str) = pattern.as_str() {
+                                // Attempt to compile regex, ignore invalid ones
+                                if let Ok(re) = Regex::new(pattern_str) {
+                                    regexes.push(re);
+                                }
                             }
                         }
                     }
